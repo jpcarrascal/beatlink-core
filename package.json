@@ -1,0 +1,23 @@
+{
+    "name": "beatlink-core",
+    "version": "0.1.0",
+    "description": "Shared backend framework for collaborative music/sound web apps (session, roles, lobby, relay)",
+    "main": "index.js",
+    "scripts": {
+        "test": "jest",
+        "test:verbose": "jest --verbose",
+        "test:watch": "jest --watch"
+    },
+    "engines": {
+        "node": ">=20"
+    },
+    "dependencies": {
+        "express": "^4.17.1",
+        "socket.io": "^4.4.0",
+        "winston": "^3.5.0"
+    },
+    "devDependencies": {
+        "jest": "^29.7.0",
+        "socket.io-client": "^4.8.1"
+    }
+}
