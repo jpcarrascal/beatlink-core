@@ -31,6 +31,9 @@ function normalizeConfig(options = {}) {
         },
         logging: { label: 'beatlink', file: 'info.log', ...(options.logging || {}) },
         plugins: options.plugins || [],
+        // Optional (socket) => overrides, evaluated when a host creates a
+        // session — e.g. sizing slots/pattern from a handshake parameter.
+        sessionOverrides: options.sessionOverrides || null,
         handleSignals: options.handleSignals !== false
     };
 }
@@ -100,7 +103,10 @@ function createServer(options = {}) {
                 return;
             }
 
-            const session = existing || sessions.create(sessionName);
+            const session = existing || sessions.create(
+                sessionName,
+                config.sessionOverrides ? (config.sessionOverrides(socket) || {}) : {}
+            );
             session.setHost(socket.id);
             logger.info(`#${sessionName} @HOST joined session.`);
 
@@ -237,6 +243,7 @@ function createServer(options = {}) {
             if (track === null) return;
             if (session.pattern.setCell(track, msg.step, msg.value)) {
                 session.touch();
+                turnTaking.markActive(session, socket.id); // grid edits count as interaction
                 io.to(sessionName).emit('pattern-updated', {
                     track, step: msg.step, value: msg.value, socketID: socket.id
                 });
@@ -250,6 +257,7 @@ function createServer(options = {}) {
             if (track === null) return;
             if (session.pattern.setRow(track, msg.values)) {
                 session.touch();
+                turnTaking.markActive(session, socket.id);
                 io.to(sessionName).emit('pattern-row-updated', {
                     track, values: session.pattern.getRow(track), socketID: socket.id
                 });
