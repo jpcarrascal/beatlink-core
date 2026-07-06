@@ -46,6 +46,7 @@ function createServer(options = {}) {
     const registry = createPluginRegistry();
     const turnTaking = new TurnTakingManager({ io, sessions, logger, registry });
     const ctx = buildPluginContext(registry, { io, app, sessions, logger, config, turnTaking });
+    turnTaking.ctx = ctx;
     config.plugins.forEach(plugin => plugin(ctx));
 
     sessions.defineAttributeDefaults(registry.attributeDefaults);
