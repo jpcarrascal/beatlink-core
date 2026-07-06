@@ -51,6 +51,12 @@ function createServer(options = {}) {
         app.use(express.static(config.staticDir));
     }
 
+    // Client SDK, served socket.io-style: browsers load the same Pattern
+    // class the server enforces (exposed as window.beatlink.Pattern).
+    app.get('/beatlink/pattern.js', (req, res) => {
+        res.sendFile(require.resolve('./lib/pattern.js'));
+    });
+
     // --- plugins ---
     const registry = createPluginRegistry();
     const turnTaking = new TurnTakingManager({ io, sessions, logger, registry });
