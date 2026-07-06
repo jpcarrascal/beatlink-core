@@ -9,8 +9,10 @@ session registry & lifecycle (preserve-by-default, explicit teardown, idle reape
 participant slots, the host/public/participant role model, Lobby/Veil, the declarative
 relay bus, ping/pong, standardized logging, the five-point plugin API, **turn-taking
 (unified eviction counter, time | rounds | none) with waiting queue + promotion (§5.6)**,
-and the **protocol-neutral routed-message transport (§5.10)**. Still to come: Transport
-(clock/tempo), Pattern, resource catalog, QR service.
+the **protocol-neutral routed-message transport (§5.10)**, **Transport (§5.7: shared
+tempo/startedAt coordination — clients schedule locally, no server playhead)**, and
+**Pattern (§5.8: opaque tracks×steps grid, slot-scoped writes, snapshot on join)**.
+Still to come: resource catalog + host upload, QR service.
 
 ## Usage
 

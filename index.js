@@ -12,10 +12,16 @@ const { wireRoutedMessages } = require('./lib/routedMessages');
 const { createPluginRegistry, buildPluginContext } = require('./lib/pluginContext');
 
 function normalizeConfig(options = {}) {
+    const session = { ...SESSION_DEFAULTS, ...(options.session || {}) };
+    // Transport and Pattern may be configured top-level (spec §7); they are
+    // per-session state, so they merge into the session config.
+    if (options.transport) session.transport = { ...session.transport, ...options.transport };
+    if (options.pattern) session.pattern = { ...session.pattern, ...options.pattern };
+
     return {
         staticDir: options.staticDir || null,
         roles: options.roles || [...ROLES],
-        session: { ...SESSION_DEFAULTS, ...(options.session || {}) },
+        session,
         relay: options.relay || {},
         routedMessages: {
             enabled: false,
@@ -52,6 +58,15 @@ function createServer(options = {}) {
     sessions.defineAttributeDefaults(registry.attributeDefaults);
     registry.routes.forEach(({ method, path, handler }) => app[method](path, handler));
     const relayMap = { ...config.relay, ...registry.relayMap };
+
+    // Pattern rows are cleared when their slot frees (spec §5.8), via the
+    // same release hook mechanism plugins use.
+    registry.releaseHooks.push((session, { slot }) => {
+        if (session.pattern && session.config.pattern.clearOnRelease) {
+            session.pattern.clear(slot);
+            io.to(session.name).emit('pattern-cleared', { track: slot, socketID: null });
+        }
+    });
 
     // --- session reaper (backstop GC, spec §4) ---
     sessions.onReap = (session) => {
@@ -119,6 +134,15 @@ function createServer(options = {}) {
                 turnTaking.setDuration(sessionName, msg && msg.seconds);
             });
 
+            socket.on('set-tempo', (msg) => {
+                const current = getSession();
+                if (!current || current.hostId !== socket.id) return;
+                if (current.setTempo(msg && msg.tempo)) {
+                    io.to(sessionName).emit('transport-state', current.getTransportState());
+                    logger.info(`#${sessionName} tempo set to ${current.transport.tempo}.`);
+                }
+            });
+
             // Explicit teardown — the deliberate destroy control (spec §4).
             socket.on('end-session', () => {
                 const current = getSession();
@@ -178,6 +202,73 @@ function createServer(options = {}) {
                 queue: session.queue.snapshot()
             });
         }
+
+        // Joining clients get current Transport and Pattern state (§5.7/§5.8).
+        {
+            const session = getSession();
+            if (session) {
+                const transportState = session.getTransportState();
+                if (transportState) socket.emit('transport-state', transportState);
+                if (session.pattern) socket.emit('pattern-snapshot', session.pattern.snapshot());
+            }
+        }
+
+        socket.on('request-pattern-snapshot', () => {
+            const session = getSession();
+            if (session && session.pattern) {
+                socket.emit('pattern-snapshot', session.pattern.snapshot());
+            }
+        });
+
+        // Pattern writes are scoped: participants write their own row only;
+        // the host may write any row (or clear all with track omitted).
+        const resolvePatternTrack = (session, msg) => {
+            if (session.hostId === socket.id) {
+                return Number.isInteger(msg && msg.track) ? msg.track : null;
+            }
+            const slot = session.participants.slotOf(socket.id);
+            return slot >= 0 ? slot : null;
+        };
+
+        socket.on('pattern-update', (msg) => {
+            const session = getSession();
+            if (!session || !session.pattern || !msg) return;
+            const track = resolvePatternTrack(session, msg);
+            if (track === null) return;
+            if (session.pattern.setCell(track, msg.step, msg.value)) {
+                session.touch();
+                io.to(sessionName).emit('pattern-updated', {
+                    track, step: msg.step, value: msg.value, socketID: socket.id
+                });
+            }
+        });
+
+        socket.on('pattern-row', (msg) => {
+            const session = getSession();
+            if (!session || !session.pattern || !msg) return;
+            const track = resolvePatternTrack(session, msg);
+            if (track === null) return;
+            if (session.pattern.setRow(track, msg.values)) {
+                session.touch();
+                io.to(sessionName).emit('pattern-row-updated', {
+                    track, values: session.pattern.getRow(track), socketID: socket.id
+                });
+            }
+        });
+
+        socket.on('pattern-clear', (msg) => {
+            const session = getSession();
+            if (!session || !session.pattern) return;
+            const isHost = session.hostId === socket.id;
+            const track = isHost
+                ? (Number.isInteger(msg && msg.track) ? msg.track : null) // null = clear all
+                : session.participants.slotOf(socket.id);
+            if (!isHost && track < 0) return;
+            if (session.pattern.clear(track)) {
+                session.touch();
+                io.to(sessionName).emit('pattern-cleared', { track, socketID: socket.id });
+            }
+        });
 
         // Latency primitive (spec §5.12).
         socket.on('ping', (msg) => {
