@@ -254,6 +254,13 @@ function midiPlugin(ctx) {
 - `ctx.config` — resolved server config.
 - Guard helpers, e.g. `ctx.requireHost(socket, session)` for privileged commands.
 
+In addition to the five general extension points, core modules expose two module-scoped
+hooks: `ctx.activationGate(fn)` (§5.6 — veto participant activation/promotion, e.g. "only
+activate when an unassigned device exists") and `ctx.onRoutedMessage(fn)` (§5.10 — observe
+every routed envelope before delivery; return `false` to drop it, e.g. during a host
+takeover). Plugins also get `ctx.turnTaking` (the manager) for queue control such as
+`forceAllToQueue`.
+
 **Rule of thumb:** if it fits these five hooks, it's app-specific. If it can't be expressed
 here, core needs extending — do that upstream (§2).
 

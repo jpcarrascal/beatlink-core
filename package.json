@@ -1,6 +1,6 @@
 {
     "name": "beatlink-core",
-    "version": "0.1.0",
+    "version": "0.2.0",
     "description": "Shared backend framework for collaborative music/sound web apps (session, roles, lobby, relay)",
     "main": "index.js",
     "scripts": {

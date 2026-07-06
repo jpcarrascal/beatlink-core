@@ -6,7 +6,9 @@ const { createLogger } = require('./lib/logging');
 const { SessionRegistry, SESSION_DEFAULTS } = require('./lib/sessions');
 const { ROLES, parseHandshake } = require('./lib/roles');
 const { wireRelays } = require('./lib/relay');
-const { emitVeilState, wireHostLobbyControls } = require('./lib/lobby');
+const { wireHostLobbyControls } = require('./lib/lobby');
+const { TurnTakingManager } = require('./lib/turnTaking');
+const { wireRoutedMessages } = require('./lib/routedMessages');
 const { createPluginRegistry, buildPluginContext } = require('./lib/pluginContext');
 
 function normalizeConfig(options = {}) {
@@ -15,6 +17,12 @@ function normalizeConfig(options = {}) {
         roles: options.roles || [...ROLES],
         session: { ...SESSION_DEFAULTS, ...(options.session || {}) },
         relay: options.relay || {},
+        routedMessages: {
+            enabled: false,
+            defaultTarget: 'host',
+            allowedTargets: ['host'],
+            ...(options.routedMessages || {})
+        },
         logging: { label: 'beatlink', file: 'info.log', ...(options.logging || {}) },
         plugins: options.plugins || [],
         handleSignals: options.handleSignals !== false
@@ -36,7 +44,8 @@ function createServer(options = {}) {
 
     // --- plugins ---
     const registry = createPluginRegistry();
-    const ctx = buildPluginContext(registry, { io, app, sessions, logger, config });
+    const turnTaking = new TurnTakingManager({ io, sessions, logger, registry });
+    const ctx = buildPluginContext(registry, { io, app, sessions, logger, config, turnTaking });
     config.plugins.forEach(plugin => plugin(ctx));
 
     sessions.defineAttributeDefaults(registry.attributeDefaults);
@@ -45,6 +54,7 @@ function createServer(options = {}) {
 
     // --- session reaper (backstop GC, spec §4) ---
     sessions.onReap = (session) => {
+        turnTaking.clearSession(session.name);
         io.to(session.name).emit('session-ended', { reason: 'idle' });
         logger.info(`#${session.name} reaped (idle).`);
     };
@@ -81,15 +91,38 @@ function createServer(options = {}) {
             socket.emit('host-accepted', {
                 session: sessionName,
                 isPlaying: session.isPlaying(),
-                participants: session.participants.snapshot()
+                participants: session.participants.snapshot(),
+                queue: session.queue.snapshot()
             });
 
             wireHostLobbyControls(io, socket, sessionName, getSession, logger);
+
+            // Queued users may become eligible when the session starts.
+            socket.on('session-play', () => {
+                const current = getSession();
+                if (!current || current.hostId !== socket.id) return;
+                turnTaking.tryPromote(sessionName);
+            });
+
+            // Rounds-mode increment (spec §5.6); apps whose loop runs on the
+            // host emit this once per iteration.
+            socket.on('turn-tick', () => {
+                const current = getSession();
+                if (!current || current.hostId !== socket.id) return;
+                turnTaking.tick(sessionName);
+            });
+
+            socket.on('set-turn-duration', (msg) => {
+                const current = getSession();
+                if (!current || current.hostId !== socket.id) return;
+                turnTaking.setDuration(sessionName, msg && msg.seconds);
+            });
 
             // Explicit teardown — the deliberate destroy control (spec §4).
             socket.on('end-session', () => {
                 const current = getSession();
                 if (!current || current.hostId !== socket.id) return;
+                turnTaking.clearSession(sessionName);
                 io.to(sessionName).emit('session-ended', { reason: 'ended-by-host' });
                 sessions.remove(sessionName);
                 logger.info(`#${sessionName} ended by host.`);
@@ -100,6 +133,7 @@ function createServer(options = {}) {
                 if (!current || current.hostId !== socket.id) return;
 
                 if (current.config.hostDisconnect === 'destroy') {
+                    turnTaking.clearSession(sessionName);
                     io.to(sessionName).emit('session-ended', { reason: 'host-disconnected' });
                     sessions.remove(sessionName);
                     logger.info(`#${sessionName} @HOST disconnected. Session destroyed.`);
@@ -120,28 +154,12 @@ function createServer(options = {}) {
                 return;
             }
 
-            const slot = session.participants.allocate(socket.id, initials);
-            if (slot === -1) {
-                socket.emit('session-full', {
-                    reason: 'No slots available right now.'
-                });
-                return;
-            }
-            session.touch();
-
-            io.to(sessionName).emit('participant-joined', { slot, initials, socketID: socket.id });
-            emitVeilState(io, socket.id, session);
-            logger.info(`#${sessionName} @[${initials}] joined session on slot ${slot}.`);
+            // Slot allocation, overflow queueing, eviction and promotion all
+            // live in the turn-taking manager (spec §5.6).
+            turnTaking.join(sessionName, session, socket, initials);
 
             socket.on('disconnect', () => {
-                const current = getSession();
-                if (!current) return;
-                const freed = current.participants.release(socket.id);
-                if (freed >= 0) {
-                    current.touch();
-                    io.to(sessionName).emit('participant-left', { slot: freed, initials, socketID: socket.id });
-                    logger.info(`#${sessionName} @[${initials}] (${socket.id}) disconnected, clearing slot ${freed}.`);
-                }
+                turnTaking.leave(sessionName, socket.id, initials);
             });
         } else { // public
             const session = getSession();
@@ -155,7 +173,8 @@ function createServer(options = {}) {
             socket.emit('session-snapshot', {
                 session: sessionName,
                 isPlaying: session.isPlaying(),
-                participants: session.participants.snapshot()
+                participants: session.participants.snapshot(),
+                queue: session.queue.snapshot()
             });
         }
 
@@ -164,16 +183,26 @@ function createServer(options = {}) {
             socket.emit('pong', msg);
         });
 
-        wireRelays(io, socket, sessionName, relayMap, () => {
+        // Any app activity counts as interaction for rounds-based eviction.
+        const onActivity = () => {
             const session = getSession();
-            if (session) session.touch();
-        });
+            if (!session) return;
+            session.touch();
+            turnTaking.markActive(session, socket.id);
+        };
+
+        wireRelays(io, socket, sessionName, relayMap, onActivity);
+
+        if (config.routedMessages.enabled) {
+            wireRoutedMessages(io, socket, sessionName, getSession, {
+                config, registry, ctx, logger, onActivity
+            });
+        }
 
         for (const [event, handlers] of registry.handlers) {
             socket.on(event, (msg) => {
-                const session = getSession();
-                if (session) session.touch();
-                handlers.forEach(handler => handler(socket, session, msg, ctx));
+                onActivity();
+                handlers.forEach(handler => handler(socket, getSession(), msg, ctx));
             });
         }
 
@@ -188,6 +217,7 @@ function createServer(options = {}) {
         io,
         httpServer,
         sessions,
+        turnTaking,
         logger,
         config,
         listen(port, callback) {
