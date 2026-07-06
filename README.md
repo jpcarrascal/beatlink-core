@@ -4,7 +4,7 @@ Shared backend framework for collaborative music/sound web apps — the common c
 `chaotic-pedalboard` (formerly midisocket), `count-me-in`, `sonar2024`, `dbass`, and
 `HootBeat`. Node.js + Express + Socket.IO.
 
-**Status: v0.2.** Implements from [BEATLINK-SPEC.md](BEATLINK-SPEC.md): runtime bootstrap,
+**Status: v0.4.** Implements from [BEATLINK-SPEC.md](BEATLINK-SPEC.md): runtime bootstrap,
 session registry & lifecycle (preserve-by-default, explicit teardown, idle reaper),
 participant slots, the host/public/participant role model, Lobby/Veil, the declarative
 relay bus, ping/pong, standardized logging, the five-point plugin API, **turn-taking
