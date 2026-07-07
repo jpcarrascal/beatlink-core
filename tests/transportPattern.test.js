@@ -171,6 +171,24 @@ describe('Transport + Pattern integration', () => {
         expect(server.sessions.get('tp5').pattern.getCell(2, 0)).toBeNull();
     });
 
+    test('rejected second host (secondary display) still receives state', async () => {
+        const host = connect({ role: 'host', session: 'tp8' });
+        await waitFor(host, 'pattern-snapshot');
+        const ackPromise = waitFor(host, 'pattern-updated');
+        host.emit('pattern-update', { track: 0, step: 0, value: 'seeded' });
+        await ackPromise;
+
+        const secondary = connect({ role: 'host', session: 'tp8' });
+        const [rejection, state, snapshot] = await Promise.all([
+            waitFor(secondary, 'host-exists'),
+            waitFor(secondary, 'transport-state'),
+            waitFor(secondary, 'pattern-snapshot')
+        ]);
+        expect(rejection.reason).toContain('tp8');
+        expect(state.tempo).toBe(120);
+        expect(snapshot.grid[0][0]).toBe('seeded');
+    });
+
     test('late joiner sees existing pattern state in its snapshot', async () => {
         const host = connect({ role: 'host', session: 'tp6' });
         await waitFor(host, 'pattern-snapshot');

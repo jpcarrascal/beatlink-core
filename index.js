@@ -105,6 +105,11 @@ function createServer(options = {}) {
                 socket.emit('host-exists', {
                     reason: `Session '${sessionName}' already has a host. Choose a different name.`
                 });
+                // A rejected host stays in the room as a passive observer
+                // (e.g. a secondary display) — give it current state.
+                const transportState = existing.getTransportState();
+                if (transportState) socket.emit('transport-state', transportState);
+                if (existing.pattern) socket.emit('pattern-snapshot', existing.pattern.snapshot());
                 logger.info(`#${sessionName} @HOST exists already.`);
                 return;
             }
