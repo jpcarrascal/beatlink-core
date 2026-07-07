@@ -16,6 +16,10 @@ the **resource catalog with host-only uploads (§5.11: declarative asset dirs, g
 listings, per-session host token auth)**, and the **in-house QR service (§5.14:
 `/beatlink/qr.png?text=...`)**. All core modules from the spec are implemented.
 
+**📖 Building or migrating an app? Read [MANUAL.md](MANUAL.md)** — the practitioner's
+guide: mental model, full config reference, module how-tos, the plugin API, patterns from
+the four production plugins, client/testing/deployment guidance, and a migration checklist.
+
 ## Usage
 
 ```js
