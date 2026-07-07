@@ -4,15 +4,17 @@ Shared backend framework for collaborative music/sound web apps — the common c
 `chaotic-pedalboard` (formerly midisocket), `count-me-in`, `sonar2024`, `dbass`, and
 `HootBeat`. Node.js + Express + Socket.IO.
 
-**Status: v0.4.** Implements from [BEATLINK-SPEC.md](BEATLINK-SPEC.md): runtime bootstrap,
+**Status: v0.7.** Implements from [BEATLINK-SPEC.md](BEATLINK-SPEC.md): runtime bootstrap,
 session registry & lifecycle (preserve-by-default, explicit teardown, idle reaper),
 participant slots, the host/public/participant role model, Lobby/Veil, the declarative
 relay bus, ping/pong, standardized logging, the five-point plugin API, **turn-taking
 (unified eviction counter, time | rounds | none) with waiting queue + promotion (§5.6)**,
 the **protocol-neutral routed-message transport (§5.10)**, **Transport (§5.7: shared
 tempo/startedAt coordination — clients schedule locally, no server playhead)**, and
-**Pattern (§5.8: opaque tracks×steps grid, slot-scoped writes, snapshot on join)**.
-Still to come: resource catalog + host upload, QR service.
+**Pattern (§5.8: opaque tracks×steps grid, slot-scoped writes, snapshot on join)**,
+the **resource catalog with host-only uploads (§5.11: declarative asset dirs, grouped
+listings, per-session host token auth)**, and the **in-house QR service (§5.14:
+`/beatlink/qr.png?text=...`)**. All core modules from the spec are implemented.
 
 ## Usage
 

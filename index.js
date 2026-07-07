@@ -2,7 +2,9 @@ const express = require('express');
 const http = require('http');
 const { Server } = require('socket.io');
 
+const QRCode = require('qrcode');
 const { createLogger } = require('./lib/logging');
+const { buildCatalogs } = require('./lib/resources');
 const { SessionRegistry, SESSION_DEFAULTS } = require('./lib/sessions');
 const { ROLES, parseHandshake } = require('./lib/roles');
 const { wireRelays } = require('./lib/relay');
@@ -29,6 +31,7 @@ function normalizeConfig(options = {}) {
             allowedTargets: ['host'],
             ...(options.routedMessages || {})
         },
+        resources: options.resources || {},
         logging: { label: 'beatlink', file: 'info.log', ...(options.logging || {}) },
         plugins: options.plugins || [],
         // Optional (socket) => overrides, evaluated when a host creates a
@@ -57,10 +60,70 @@ function createServer(options = {}) {
         res.sendFile(require.resolve('./lib/pattern.js'));
     });
 
+    // QR / session-URL service (spec §5.14), in-house so live sessions never
+    // depend on a third-party generator.
+    app.get('/beatlink/qr.png', (req, res) => {
+        const text = `${req.query.text || ''}`;
+        if (!text || text.length > 2048) {
+            res.status(400).json({ error: 'text required (max 2048 chars)' });
+            return;
+        }
+        const width = Math.min(1024, Math.max(64, parseInt(req.query.size, 10) || 256));
+        QRCode.toBuffer(text, { width, margin: 1 })
+            .then(buffer => res.type('png').send(buffer))
+            .catch(() => res.status(500).json({ error: 'qr generation failed' }));
+    });
+
+    // --- resource catalog (spec §5.11) ---
+    const resources = buildCatalogs(config.resources);
+
+    app.get('/beatlink/resources/:name', (req, res) => {
+        const catalog = resources.get(req.params.name);
+        if (!catalog) {
+            res.status(404).json({ error: 'unknown resource' });
+            return;
+        }
+        const listing = catalog.list(req.query.group !== undefined ? `${req.query.group}` : null);
+        if (!listing) {
+            res.status(404).json({ error: 'unknown group' });
+            return;
+        }
+        res.json(listing);
+    });
+
+    // Host-only upload: authenticated with the per-session host token
+    // delivered in `host-accepted`.
+    app.post('/beatlink/resources/:name/upload',
+        express.raw({ type: () => true, limit: '32mb' }),
+        (req, res) => {
+            const catalog = resources.get(req.params.name);
+            if (!catalog) {
+                res.status(404).json({ error: 'unknown resource' });
+                return;
+            }
+            const session = sessions.get(`${req.query.session || ''}`);
+            if (!session || !session.hostToken || req.query.token !== session.hostToken) {
+                res.status(403).json({ error: 'host token required' });
+                return;
+            }
+            const result = catalog.saveUpload(
+                req.query.filename,
+                req.body,
+                req.query.group !== undefined ? `${req.query.group}` : null
+            );
+            if (result.error) {
+                res.status(result.error === 'too-large' ? 413 : 400).json(result);
+                return;
+            }
+            io.to(session.name).emit('resource-updated', { name: catalog.name, file: result.file });
+            logger.info(`#${session.name} @HOST uploaded ${catalog.name}/${result.file}`);
+            res.json(result);
+        });
+
     // --- plugins ---
     const registry = createPluginRegistry();
     const turnTaking = new TurnTakingManager({ io, sessions, logger, registry });
-    const ctx = buildPluginContext(registry, { io, app, sessions, logger, config, turnTaking });
+    const ctx = buildPluginContext(registry, { io, app, sessions, logger, config, turnTaking, resources });
     turnTaking.ctx = ctx;
     config.plugins.forEach(plugin => plugin(ctx));
 
@@ -125,7 +188,8 @@ function createServer(options = {}) {
                 session: sessionName,
                 isPlaying: session.isPlaying(),
                 participants: session.participants.snapshot(),
-                queue: session.queue.snapshot()
+                queue: session.queue.snapshot(),
+                hostToken: session.hostToken
             });
 
             wireHostLobbyControls(io, socket, sessionName, getSession, logger);
@@ -229,6 +293,20 @@ function createServer(options = {}) {
                 if (session.pattern) socket.emit('pattern-snapshot', session.pattern.snapshot());
             }
         }
+
+        socket.on('request-resource-catalog', (msg) => {
+            const catalog = msg && resources.get(msg.name);
+            if (!catalog) {
+                socket.emit('resource-error', { reason: 'unknown-resource' });
+                return;
+            }
+            const listing = catalog.list(msg.group !== undefined && msg.group !== null ? `${msg.group}` : null);
+            if (!listing) {
+                socket.emit('resource-error', { reason: 'unknown-group' });
+                return;
+            }
+            socket.emit('resource-catalog', listing);
+        });
 
         socket.on('request-pattern-snapshot', () => {
             const session = getSession();
