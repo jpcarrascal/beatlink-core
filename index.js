@@ -19,6 +19,8 @@ function normalizeConfig(options = {}) {
     // per-session state, so they merge into the session config.
     if (options.transport) session.transport = { ...session.transport, ...options.transport };
     if (options.pattern) session.pattern = { ...session.pattern, ...options.pattern };
+    // `lobby` may also be configured top-level (spec §7).
+    if (options.lobby !== undefined) session.lobby = options.lobby;
 
     return {
         staticDir: options.staticDir || null,

@@ -104,6 +104,7 @@ createServer({
     veilWhileHostAway: false,         // veil participants while host is gone
     hostOptional: true,               // session is 'ready' without a live host
     idleReapMinutes: 30,              // GC: reap after this long with no host AND no participants
+    lobby: true,                      // auto-veil joiners while not playing; false = app-managed veil (§6.1)
     turnTaking: {
       count: 'none',                  // 'none' | 'time' | 'rounds'
       threshold: 0,                   // seconds (time) or loops (rounds)
@@ -186,8 +187,15 @@ listen(port, cb), close() }`.
 ### 6.1 Lobby / Veil
 Participants joining a paused session receive `veil-on`; `session-play` broadcasts
 `veil-off` to everyone at once (the synchronized start); late joiners while playing skip
-the lobby. `session-mode {isPlaying}` accompanies changes. Apps that manage their own veil
-(dbass) simply don't emit `session-play/pause` and relay their own `veil-*` events instead.
+the lobby. `session-mode {isPlaying}` accompanies changes.
+
+**Apps that manage their own veil must set `lobby: false`** (top-level or under
+`session`). Not emitting `session-play/pause` is *not* enough: the automatic join-time veil
+keys off `session.isPlaying()`, which an app's own play/stop handlers also drive — so
+without the opt-out, every participant joining before "play" gets `veil-on`. With
+`lobby: false` core never sends a join-time veil (direct join or queue); explicit
+`session-play/pause` and any app relays of `veil-*` still work. dbass learned this the
+hard way: its blank veil covered the "please wait / tap to start" message (§9.3).
 
 ### 6.2 Turn-taking + queue
 One mechanism, pluggable count source:
@@ -365,7 +373,8 @@ slots+pattern from the host's `sounds` handshake param.
 ### 9.3 dbass — `server/dbassPlugin.js`
 *Roles:* control panel = host · QR screen = public (no longer burns a slot) · phones =
 participant (user-agent as initials). *Core config:* `hostDisconnect:'destroy'` (legacy
-default), `hostOptional:true`, resources: grouped `sounds` catalog.
+default), `hostOptional:true`, `lobby:false` (dbass's own pre-start screen is the
+"tap to start" message, not core's veil), resources: grouped `sounds` catalog.
 
 | Pattern | How |
 |---|---|
