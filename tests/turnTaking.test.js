@@ -229,6 +229,35 @@ describe('rounds-based eviction', () => {
         const status = await statusPromise;
         expect(status.total).toBe(1);
     });
+
+    test('evicted participant alone in line regains the free slot without another release', async () => {
+        const host = connect(port, { role: 'host', session: 'r2' }, clients);
+        await waitFor(host, 'host-accepted');
+        const p1 = connect(port, { role: 'participant', session: 'r2', initials: 'P1' }, clients);
+        await waitFor(p1, 'veil-on');
+        p1.emit('activity', {});
+        await waitFor(host, 'activity');
+
+        const expiredPromise = waitFor(p1, 'slot-expired');
+        const leftPromise = waitForMatch(host, 'participant-left', msg => msg.initials === 'P1');
+        const rejoinedPromise = waitForMatch(host, 'participant-joined', msg => msg.initials === 'P1');
+
+        host.emit('turn-tick');
+        host.emit('turn-tick');
+        host.emit('turn-tick'); // > threshold -> evict
+        await expiredPromise;
+        await leftPromise;
+
+        // No tryPromote, disconnect or host reconnect: core promotes on its own.
+        const rejoined = await rejoinedPromise;
+        expect(rejoined.slot).toBe(0);
+        const session = server.sessions.get('r2');
+        expect(session.queue.length()).toBe(0);
+        const participant = session.participants.get(0);
+        expect(participant.socketID).toBe(p1.id);
+        expect(participant.rounds).toBe(0);
+        expect(participant.countingRounds).toBe(false);
+    });
 });
 
 describe('activation gates and plugin queue control', () => {
@@ -272,6 +301,26 @@ describe('activation gates and plugin queue control', () => {
 
         const joined = await waitForMatch(host, 'participant-joined', msg => msg.initials === 'P1');
         expect(joined.slot).toBe(0);
+    });
+
+    test('joiner behind a backlog triggers promotion when slots are free', async () => {
+        const host = connect(port, { role: 'host', session: 'g3' }, clients);
+        await waitFor(host, 'host-accepted');
+
+        const p1 = connect(port, { role: 'participant', session: 'g3', initials: 'P1' }, clients);
+        await waitFor(p1, 'queue-status'); // gate closed -> queued
+
+        // Gate opens but nobody calls tryPromote: P1 waits next to free slots.
+        server.sessions.get('g3').setAttribute('gateOpen', true);
+
+        const p1Joined = waitForMatch(host, 'participant-joined', msg => msg.initials === 'P1');
+        const p2Joined = waitForMatch(host, 'participant-joined', msg => msg.initials === 'P2');
+        connect(port, { role: 'participant', session: 'g3', initials: 'P2' }, clients);
+
+        // Line order is kept: P1 (already waiting) gets slot 0, P2 slot 1.
+        expect((await p1Joined).slot).toBe(0);
+        expect((await p2Joined).slot).toBe(1);
+        expect(server.sessions.get('g3').queue.length()).toBe(0);
     });
 
     test('forceAllToQueue moves active participants back to the line (takeover primitive)', async () => {
