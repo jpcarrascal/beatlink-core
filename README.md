@@ -1,7 +1,7 @@
 # beatlink-core
 
 Shared backend framework for collaborative music/sound web apps — the common core behind
-`[Count-Me-In](https://jpcarrascal.com/projects/count-me-in/)`, `DBASS` (Aka. `[A Sense of Surrounding](https://jpcarrascal.com/projects/a-sense-of-surrounding/)`), `[HootBeat](https://jpcarrascal.com/projects/hootbeat/)` and the `[Chaotic Pedalboard](https://jpcarrascal.com/projects/chaotic-pedalboard/)`. Node.js + Express + Socket.IO.
+[Count-Me-In](https://jpcarrascal.com/projects/count-me-in/), DBASS (Aka. [A Sense of Surrounding](https://jpcarrascal.com/projects/a-sense-of-surrounding/)), [HootBeat](https://jpcarrascal.com/projects/hootbeat/), the [Chaotic Pedalboard](https://jpcarrascal.com/projects/chaotic-pedalboard/) and [Collective Smile](https://jpcarrascal.com/projects/sonar-ai-playground/). Node.js + Express + Socket.IO.
 
 **Status: v0.8.** Implements from [BEATLINK-SPEC.md](BEATLINK-SPEC.md): runtime bootstrap,
 session registry & lifecycle (preserve-by-default, explicit teardown, idle reaper),
