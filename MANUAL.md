@@ -276,7 +276,10 @@ live session never depends on a third-party generator.
 - `relay: { event: mode }` — `broadcast` (everyone else), `session` (everyone incl.
   sender), `sender` (echo). Use for pure passthroughs with no server state; the moment you
   need logging detail or state, use a plugin handler instead.
-- `ping`/`pong` echo for the latency tool.
+- `ping`/`pong` echoes any payload, for clients in a session.
+- `GET /latency` is the built-in latency tool. It needs no session, and core registers it
+  before app routes, so don't define your own `/latency`. It measures network round trip
+  (not audio output latency).
 - Logging: winston, `#session @[initials] …` convention — keep it, cross-app log tooling
   depends on it.
 

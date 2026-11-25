@@ -209,6 +209,11 @@ resources: {
 `ping → pong` round-trip primitive plus the shared latency-measurement client surface
 (`/latency`) used to characterize a venue before an event.
 
+The page uses a dedicated namespace (`/beatlink-latency`) that only echoes integer sequence
+numbers, so it works with no session open, takes no slot and fires no plugin hooks. Round
+trips are timed on the client with `performance.now()`; it reports min/max/mean/median,
+95th percentile, jitter (mean absolute difference between consecutive round trips) and losses.
+
 ### 5.13 Diagnostics logging
 The standardized structured log line (`#session @[initials] <event> …`) centralized so
 cross-app analysis tooling works uniformly. Console + file transports.

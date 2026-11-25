@@ -3,10 +3,10 @@
 Shared backend framework for collaborative music/sound web apps — the common core behind
 [Count-Me-In](https://jpcarrascal.com/projects/count-me-in/), DBASS (Aka. [A Sense of Surrounding](https://jpcarrascal.com/projects/a-sense-of-surrounding/)), [HootBeat](https://jpcarrascal.com/projects/hootbeat/), the [Chaotic Pedalboard](https://jpcarrascal.com/projects/chaotic-pedalboard/) and [Collective Smile](https://jpcarrascal.com/projects/sonar-ai-playground/). Node.js + Express + Socket.IO.
 
-**Status: v0.8.** Implements from [BEATLINK-SPEC.md](BEATLINK-SPEC.md): runtime bootstrap,
+**Status: v0.9.** Implements from [BEATLINK-SPEC.md](BEATLINK-SPEC.md): runtime bootstrap,
 session registry & lifecycle (preserve-by-default, explicit teardown, idle reaper),
 participant slots, the host/public/participant role model, Lobby/Veil, the declarative
-relay bus, ping/pong, standardized logging, the five-point plugin API, **turn-taking
+relay bus, ping/pong and the `/latency` tool, standardized logging, the five-point plugin API, **turn-taking
 (unified eviction counter, time | rounds | none) with waiting queue + promotion (§5.6)**,
 the **protocol-neutral routed-message transport (§5.10)**, **Transport (§5.7: shared
 tempo/startedAt coordination — clients schedule locally, no server playhead)**, and
@@ -62,7 +62,7 @@ const socket = io({ query: { role: 'participant', session: 'gig', initials: 'JP'
 | `end-session` | host → server | explicit teardown |
 | `session-ended` | server → session | teardown/reap notification |
 | `session-snapshot` | server → public | current state for displays |
-| `ping` / `pong` | client ↔ server | latency primitive |
+| `ping` / `pong` | client ↔ server | in-session latency primitive (the `/latency` page needs no session) |
 | `queue-status` | server → queued client | 1-based position in the line |
 | `queue-updated` | server → host+public | queue length, active slots, next in line |
 | `slot-expired` | server → evicted client | turn is over (moved back to the line) |
