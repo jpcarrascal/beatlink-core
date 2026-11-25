@@ -7,6 +7,7 @@ const { createLogger } = require('./lib/logging');
 const { buildCatalogs } = require('./lib/resources');
 const { SessionRegistry, SESSION_DEFAULTS } = require('./lib/sessions');
 const { ROLES, parseHandshake } = require('./lib/roles');
+const { wireLatency } = require('./lib/latency');
 const { wireRelays } = require('./lib/relay');
 const { wireHostLobbyControls } = require('./lib/lobby');
 const { TurnTakingManager } = require('./lib/turnTaking');
@@ -61,6 +62,8 @@ function createServer(options = {}) {
     app.get('/beatlink/pattern.js', (req, res) => {
         res.sendFile(require.resolve('./lib/pattern.js'));
     });
+
+    wireLatency(io, app);
 
     // QR / session-URL service (spec §5.14), in-house so live sessions never
     // depend on a third-party generator.
@@ -369,7 +372,8 @@ function createServer(options = {}) {
             }
         });
 
-        // Latency primitive (spec §5.12).
+        // In-session latency primitive (spec §5.12); the /latency page uses
+        // its own sessionless namespace (lib/latency.js).
         socket.on('ping', (msg) => {
             socket.emit('pong', msg);
         });

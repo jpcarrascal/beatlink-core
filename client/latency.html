@@ -1,0 +1,194 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Latency</title>
+<style>
+  body { margin: 0; font-family: Arial, sans-serif; touch-action: manipulation; }
+  table { width: 100%; border-collapse: collapse; }
+  th, td { width: 50%; padding: .2em; text-align: left; border: 1px solid #AAA; }
+  th { background: #f2f2f2; }
+  td.pad { padding: 0; }
+  #list, #hover { height: 14em; position: relative; overflow: hidden; }
+  #list { overflow-y: auto; white-space: pre; }
+  #hover { background: #DDD; touch-action: none; }
+  button { width: 100%; height: 2.4em; font-size: 1em; }
+  #cursor { position: absolute; width: .8em; height: .8em; margin: -.65em; border: 5px solid tomato;
+    border-radius: 50%; pointer-events: none; visibility: hidden; }
+  #status.running { background: lightcoral; }
+  #status.done { background: rgb(34, 213, 135); }
+  #status.error { background: #ffd27f; }
+</style>
+</head>
+<body>
+<table>
+  <tr><th>Round trip (ms)</th><th>Move here to feel it: <span id="hover-rtt"></span></th></tr>
+  <tr><td class="pad"><div id="list"></div></td>
+      <td class="pad"><div id="hover"><div id="cursor"></div></div></td></tr>
+  <tr><td>Min</td><td id="min"></td></tr>
+  <tr><td>Max</td><td id="max"></td></tr>
+  <tr><td>Mean</td><td id="mean"></td></tr>
+  <tr><td>Median</td><td id="median"></td></tr>
+  <tr><td>95th percentile</td><td id="p95"></td></tr>
+  <tr><td>Jitter</td><td id="jitter"></td></tr>
+  <tr><td>Received / sent (lost)</td><td id="counts"></td></tr>
+  <tr><td>Connection</td><td id="transport"></td></tr>
+  <tr><td class="pad"><button id="start" disabled>Start</button></td>
+      <td class="pad"><button id="stop" disabled>Stop</button></td></tr>
+  <tr><td id="status">Connecting...</td><td id="time"></td></tr>
+</table>
+
+<script src="/socket.io/socket.io.js"></script>
+<script src="/beatlink/latency-stats.js"></script>
+<script>
+  const PING_INTERVAL = 100;    // ms
+  const DURATION = 60000;       // ms
+  const LATE_GRACE = 2000;      // ms to wait for late pongs before counting losses
+  const UPGRADE_TIMEOUT = 5000; // ms before settling for HTTP long-polling
+  const STATS = ['min', 'max', 'mean', 'median', 'p95', 'jitter'];
+
+  const $ = id => document.getElementById(id);
+  const socket = io('/beatlink-latency');
+
+  // Both ends of every measurement use this device's performance.now(),
+  // keyed by sequence number; the server only echoes the number.
+  let seq = 0;
+  const hoverPings = new Map(); // seq -> {sent, x, y}
+  let run = null;               // {started, sent: Map(seq -> sent), rtts: Map(seq -> rtt), total, timer}
+  let phase = 'idle';           // idle | running | draining
+  let ready = false;
+  let upgradeTimer;
+
+  function setStatus(text, cls) {
+    $('status').textContent = text;
+    $('status').className = cls || '';
+  }
+
+  function updateButtons() {
+    $('start').disabled = !ready || phase !== 'idle';
+    $('stop').disabled = phase !== 'running';
+  }
+
+  // Samples in send order.
+  function samples() {
+    return [...run.rtts].sort((a, b) => a[0] - b[0]).map(entry => entry[1]);
+  }
+
+  function renderStats() {
+    const stats = beatlink.latencyStats(samples());
+    STATS.forEach(key => { $(key).textContent = stats ? stats[key].toFixed(2) : ''; });
+    const done = phase === 'idle';
+    $('counts').textContent = run.rtts.size + ' / ' + run.total +
+      (done ? ' (' + (run.total - run.rtts.size) + ')' : '');
+  }
+
+  function tick() {
+    const elapsed = performance.now() - run.started;
+    if (elapsed >= DURATION) return finish('Done, thank you!', 'done');
+    const id = ++seq;
+    run.total++;
+    run.sent.set(id, performance.now());
+    socket.emit('ping', id);
+    $('time').textContent = Math.floor(elapsed / 1000) + ' s of ' + DURATION / 1000 + ' s';
+    renderStats();
+  }
+
+  function finish(message, cls) {
+    if (phase !== 'running') return;
+    clearInterval(run.timer);
+    phase = 'draining';
+    setStatus('Waiting for late replies...', 'running');
+    updateButtons();
+    setTimeout(() => {
+      phase = 'idle';
+      renderStats();
+      setStatus(message, cls);
+      updateButtons();
+    }, LATE_GRACE);
+  }
+
+  $('start').addEventListener('click', () => {
+    if (!ready || phase !== 'idle') return;
+    phase = 'running';
+    run = { started: performance.now(), sent: new Map(), rtts: new Map(), total: 0 };
+    $('list').textContent = '';
+    setStatus('Measuring for 1 min...', 'running');
+    updateButtons();
+    run.timer = setInterval(tick, PING_INTERVAL);
+    tick();
+  });
+  $('stop').addEventListener('click', () => finish('Stopped early', 'done'));
+
+  socket.on('pong', (id) => {
+    const now = performance.now(); // first, before any DOM work
+    if (run && run.sent.has(id)) {
+      const rtt = now - run.sent.get(id);
+      run.sent.delete(id);
+      run.rtts.set(id, rtt);
+      $('list').append(rtt.toFixed(2) + '\n');
+      $('list').scrollTop = $('list').scrollHeight;
+    } else if (hoverPings.has(id)) {
+      const ping = hoverPings.get(id);
+      hoverPings.delete(id);
+      $('hover-rtt').textContent = (now - ping.sent).toFixed(1);
+      $('cursor').style.left = ping.x + 'px';
+      $('cursor').style.top = ping.y + 'px';
+    }
+  });
+
+  // The hover area shows the round trip as a trailing cursor. It is never part
+  // of the timed statistics, and is off during a run so it can't add load.
+  $('hover').addEventListener('pointermove', (e) => {
+    if (!ready || phase !== 'idle') return;
+    const rect = $('hover').getBoundingClientRect();
+    const id = ++seq;
+    hoverPings.set(id, { sent: performance.now(), x: e.clientX - rect.left, y: e.clientY - rect.top });
+    $('cursor').style.visibility = 'visible';
+    socket.emit('ping', id);
+  });
+  ['pointerleave', 'pointercancel'].forEach(type => $('hover').addEventListener(type, () => {
+    $('cursor').style.visibility = 'hidden';
+  }));
+
+  function setReady(name) {
+    clearTimeout(upgradeTimer);
+    $('transport').textContent = name;
+    ready = true;
+    if (phase === 'idle') {
+      setStatus(name === 'websocket' ? 'Ready: measure for 1 min'
+        : 'Ready, but no WebSocket: results will be slower', name === 'websocket' ? '' : 'error');
+    }
+    updateButtons();
+  }
+
+  // Wait for the WebSocket upgrade so polling samples don't skew the results.
+  socket.on('connect', () => {
+    const engine = socket.io.engine;
+    const name = () => engine.transport.name;
+    $('transport').textContent = name();
+    if (name() === 'websocket') return setReady(name());
+    engine.once('upgrade', () => setReady(name()));
+    clearTimeout(upgradeTimer);
+    upgradeTimer = setTimeout(() => setReady(name()), UPGRADE_TIMEOUT);
+  });
+
+  function lost(message) {
+    clearTimeout(upgradeTimer);
+    ready = false;
+    hoverPings.clear();
+    $('transport').textContent = 'not connected';
+    if (phase === 'idle') setStatus(message, 'error');
+    finish(message, 'error');
+    updateButtons();
+  }
+  socket.on('disconnect', reason => lost('Disconnected: ' + reason));
+  socket.on('connect_error', err => lost('Cannot connect: ' + err.message));
+
+  // Browsers throttle timers in background tabs, which would spoil the run.
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden) finish('Stopped: page was hidden', 'error');
+  });
+</script>
+</body>
+</html>
